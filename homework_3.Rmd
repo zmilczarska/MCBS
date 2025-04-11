@@ -1,0 +1,298 @@
+---
+title: "homework_3"
+output: html_document
+date: "2025-04-11"
+---
+
+```{r setup, include=FALSE}
+all_times <- list()  # store the time for each chunk
+knitr::knit_hooks$set(time_it = local({
+  now <- NULL
+  function(before, options) {
+    if (before) {
+      now <<- Sys.time()
+    } else {
+      res <- difftime(Sys.time(), now, units = "secs")
+      all_times[[options$label]] <<- res
+    }
+  }
+}))
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 95),
+  message = FALSE,
+  warning = FALSE,
+  time_it = TRUE
+)
+```
+
+```{r init}
+library(dplyr)
+library(Seurat)
+library(patchwork)
+#for an error: object ‘markvario’ is not exported by 'namespace:spatstat'
+remotes::install_version("spatstat", version = "1.64-1")
+```
+# Homework Problem 1
+Analyze the 68k PBMCs dataset in the same way as presented in the Seurat's guide with PBMC3k. Apply QC, PCA, jackstraw, clustering, and t-SNE to create figure similar to Figure 3b on Zheng et al. 2017. Note that there are differences between Zheng's original analysis and Seurat's analysis. Pay attentions to hyper-parameters that you must choose for this new bigger dataset.
+
+```{r}
+# Load the 68k PBMC dataset
+pbmc68k.data <- Read10X(data.dir = "C:/Users/zmzuz/import_zuza/studia_II/1_rok/2_semestr/modelowanie/lab6/fresh_68k_pbmc_donor_a/filtered_matrices_mex/hg19")
+pbmc68k <- CreateSeuratObject(counts = pbmc68k.data, project = "pbmc68k", 
+                             min.cells = 3, min.features = 200)
+pbmc68k
+```
+
+```{r}
+head(pbmc68k@meta.data, 5)
+```
+
+```{r}
+pbmc68k.data[c("CD3D","TCL1A","MS4A1"), 1:30]
+```
+Quality Control
+```{r}
+# mitochondrial gene percentage
+pbmc68k[["percent.mt"]] <- PercentageFeatureSet(pbmc68k, pattern = "^MT-")
+```
+```{r}
+# Visualize QC metrics
+VlnPlot(pbmc68k, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+plot1 <- FeatureScatter(pbmc68k, feature1 = "nCount_RNA", feature2 = "percent.mt") 
+plot2 <- FeatureScatter(pbmc68k, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") 
+plot1 + plot2
+
+pbmc68k <- subset(pbmc68k, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 5)
+
+```
+Normalization and Feature Selection
+```{r}
+pbmc68k <- NormalizeData(pbmc68k)
+pbmc68k <- FindVariableFeatures(pbmc68k, selection.method = "vst", nfeatures = 2000)
+```
+
+```{r var_features, fig.height=5, fig.width=11}
+
+# 10 most highly variable genes
+top10 <- head(VariableFeatures(pbmc68k), 10)
+
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(pbmc68k)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot1 + plot2
+```
+Scaling and PCA
+```{r}
+all.genes <- rownames(pbmc68k)
+pbmc68k <- ScaleData(pbmc68k, features = all.genes)
+pbmc68k <- RunPCA(pbmc68k, features = VariableFeatures(object = pbmc68k))
+```
+Determine Dimensionality
+```{r pca_viz, message=TRUE}
+
+print(pbmc68k[['pca']], dims = 1:5, nfeatures = 5)
+VizDimLoadings(pbmc68k, dims = 1:2, reduction = 'pca')
+DimPlot(pbmc68k, reduction = 'pca')
+```
+
+```{r single-heatmap}
+DimHeatmap(pbmc68k, dims = 1, cells = 500, balanced = TRUE)
+```
+
+```{r multi-heatmap, fig.height=15, fig.width=9}
+DimHeatmap(pbmc68k, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+
+```{r}
+# JackStraw procedure (commented out for speed)
+#pbmc68k <- JackStraw(pbmc68k, num.replicate = 100)
+#pbmc68k <- ScoreJackStraw(pbmc68k, dims = 1:20)
+
+JackStrawPlot(pbmc68k, dims = 1:20)
+```
+
+
+
+```{r}
+# Elbow plot
+ElbowPlot(pbmc68k, ndims = 50)
+```
+Clustering
+```{r}
+pbmc68k <- FindNeighbors(pbmc68k, dims = 1:15)
+pbmc68k <- FindClusters(pbmc68k, resolution = 0.8)  # Increased resolution for larger dataset
+```
+```{r}
+head(Idents(pbmc68k), 5)
+```
+
+t-SNE Visualization
+```{r}
+pbmc68k <- RunTSNE(pbmc68k, dims = 1:15)
+DimPlot(pbmc68k, reduction = "tsne", label = TRUE)
+```
+
+```{r saveobject, eval=FALSE}
+dir.create("../output", showWarnings = FALSE, recursive = TRUE)
+
+saveRDS(pbmc68k, file = "../output/pbmc68k_tutorial.rds")
+```
+Differential Expression Analysis
+```{r}
+# markers for all clusters
+pbmc68k.markers <- FindAllMarkers(pbmc68k, only.pos = TRUE, 
+                                 min.pct = 0.25, logfc.threshold = 0.25)
+
+# Top markers per cluster
+pbmc68k.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_log2FC)
+```
+
+Visualization of marker genes 
+```{r}
+# Visualize marker genes
+FeaturePlot(pbmc68k, 
+            features = c("CCR7", "LEF1", "GZMK", "DUSP2", "IL7R", "S100B"),
+            reduction = "tsne",  
+            ncol = 3,            
+            order = TRUE,        
+            pt.size = 0.5,       
+            cols = c("lightgrey", "blue"), 
+            combine = TRUE) +    
+  plot_annotation(title = "Marker genes")
+```
+
+Cluster annotation
+```{r}
+cluster_levels <- levels(pbmc68k)
+new.cluster.ids <- c("Naive CD4 T", "CD14+ Mono", "Memory CD4 T", "B", 
+                    "CD8 T", "FCGR3A+ Mono", "NK", "DC", "Platelet",
+                    "Activated CD4 T", "Progenitor", "Other",
+                    rep("Unknown", length(cluster_levels) - 12))
+names(new.cluster.ids) <- cluster_levels
+pbmc68k <- RenameIdents(pbmc68k, new.cluster.ids)
+DimPlot(pbmc68k, reduction = "tsne", label = TRUE, pt.size = 0.5) + NoLegend()
+```
+
+differences from the PBMC3k tutorial include:
+-Adjusted QC thresholds (higher nFeature cutoff for larger dataset)
+-Used more PCs (15 instead of 10) to capture additional variation
+-Increased clustering resolution (0.8 instead of 0.5) to detect more subpopulations
+-Added t-SNE visualization instead of UMAP for better comparison with Zheng et al.
+
+# Homework Problem 2
+Create a hierachical clustering by applying K-means clustering to cells defined by each of 10 cluster. Try to find a suitable number of clusters (k) for each sub-population.
+
+Present
+
+* overall t-SNE visualization with all clusters -- make sure that hierarchy (group) is visualized. 
+* visualize t-SNE for each of 10 clusters, with their sub-clusters.
+
+```{r}
+
+pbmc68k <- readRDS("C:/Users/zmzuz/import_zuza/studia_II/1_rok/2_semestr/modelowanie/output/pbmc68k_tutorial.rds")
+
+Idents(pbmc68k) <- "seurat_clusters"
+```
+
+
+```{r}
+# hierarchical clustering
+pbmc68k$main_cluster <- Idents(pbmc68k) 
+pbmc68k$subcluster <- as.character(Idents(pbmc68k))  
+
+# Function to determine optimal k ( elbow method)
+find_optimal_k <- function(data, max_k = 5) {
+  wss <- sapply(1:max_k, function(k) {
+    kmeans(data, centers = k, nstart = 25)$tot.withinss
+  })
+  which.min(diff(wss)/wss[-length(wss)]) + 1
+}
+```
+
+```{r}
+# Perform hierarchical clustering for each main cluster
+pbmc68k <- FindClusters(pbmc68k, resolution = 0.9)
+
+
+pbmc68k$hierarchical <- NA
+for (cluster in 0:9) {
+  if (cluster %in% levels(Idents(pbmc68k))) {
+    cells <- WhichCells(pbmc68k, idents = cluster)
+    subset_data <- subset(pbmc68k, cells = cells)
+  
+  if (!"pca" %in% names(subset_data@reductions)) {
+    subset_data <- RunPCA(subset_data, npcs = 15)
+  }
+}
+    
+  
+  # PCA embeddings
+  pca_data <- Embeddings(subset_data, "pca")[,1:15]
+  
+  # Determine optimal k 
+  optimal_k <- max(2, find_optimal_k(pca_data))
+  
+  # Perform K-means clustering
+  km_res <- kmeans(pca_data, centers = optimal_k, nstart = 25)
+  
+  # Assign subcluster IDs
+  pbmc68k$subcluster[cells] <- paste0(cluster, "_", km_res$cluster)
+}
+```
+
+
+```{r plots, fig.width=10, fig.height=4}
+# Visualization
+library(ggplot2)
+# color palette for hierarchical visualization
+main_colors <- scales::hue_pal()(length(levels(Idents(pbmc68k))))
+subcluster_colors <- unlist(lapply(1:length(main_colors), function(i) {
+  shades <- colorRampPalette(c(main_colors[i], "white"))(7)[2:4]
+  shades[1:3] 
+}))
+
+# t-SNE with hierarchy
+p1 <- DimPlot(pbmc68k, group.by = "main_cluster", label = TRUE) + 
+  ggtitle("Main Clusters (10 groups)")
+p2 <- DimPlot(pbmc68k, group.by = "subcluster", label = FALSE, cols = subcluster_colors) +
+  ggtitle("Hierarchical Subclusters")
+combined_plot <- p1 + p2
+combined_plot
+
+# Individual cluster visualizations
+subcluster_plots <- list()
+for (cluster in levels(Idents(pbmc68k))) {
+  cells <- WhichCells(pbmc68k, idents = cluster)
+  subset_data <- subset(pbmc68k, cells = cells)
+  
+  subcluster_plots[[cluster]] <- DimPlot(subset_data, 
+                                       group.by = "subcluster",
+                                       label = TRUE) +
+    ggtitle(paste("Cluster", cluster, "Subclusters")) +
+    theme(legend.position = "none")
+}
+
+```
+```{r}
+head(pbmc68k@meta.data, 5)
+```
+
+
+```{r plots, fig.width=10, fig.height=12 }
+# all subcluster plots
+wrap_plots(subcluster_plots, ncol = 3)
+```
+
+```{r}
+# Save results
+saveRDS(pbmc68k, "pbmc68k_hierarchical.rds")
+```
+
+<details>
+  <summary>**Session Info**</summary>
+```{r}
+sessionInfo()
+```
+</details>
