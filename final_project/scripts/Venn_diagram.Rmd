@@ -1,0 +1,131 @@
+---
+title: "Venn_diagram"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Loading gene specificity data
+# Assuming the file has columns: 'ENSGID', 'Supercluster_ID', 'specificity'
+# and contains information about TDEP genes for each supercluster
+
+```{r}
+library(dplyr)
+library(readr)
+library(VennDiagram)
+library(grid)
+```
+Load data from gzipped TSV file
+```{r}
+super_df <- tryCatch({
+  read_tsv(paste0("../data/supercluster_gene_specificity.tsv.gz"), 
+           col_types = cols(
+             ENSGID = col_character(),
+             Supercluster_ID = col_character(),
+             specificity = col_double(),
+             .default = col_guess()
+           ))
+}, error = function(e) {
+  stop("Error loading data file: ", e$message)
+})
+```
+
+```{r}
+# Check data structure
+message("\nLoaded ", nrow(super_df), " rows from supercluster_gene_specificity.tsv.gz")
+message("Available Supercluster_IDs: ", paste(unique(super_df$Supercluster_ID), collapse = ", "))
+
+# Select TDEP genes: top 10% most specific genes in each Supercluster_ID
+tdep_genes <- super_df %>%
+  group_by(Supercluster_ID) %>%
+  arrange(desc(specificity)) %>%
+  filter(row_number() <= ceiling(0.10 * n())) %>%
+  ungroup()
+
+message("\nSelected ", nrow(tdep_genes), " TDEP genes (top 10% specificity) across all superclusters")
+
+```
+
+```{r}
+# Define superclusters to compare
+cluster1 <- "Amygdala_excitatory"
+cluster2 <- "Hippocampal_CA1_3"
+
+# Extract TDEP genes for each supercluster
+tdep_Amygdala <- tdep_genes %>% 
+  filter(Supercluster_ID == cluster1) %>% 
+  pull(ENSGID) %>%
+  unique()
+
+tdep_Hippocampal <- tdep_genes %>% 
+  filter(Supercluster_ID == cluster2) %>% 
+  pull(ENSGID) %>%
+  unique()
+
+# Diagnostic messages
+message("\nTDEP gene counts:")
+message("- ", cluster1, ": ", length(tdep_Amygdala), " genes")
+message("- ", cluster2, ": ", length(tdep_Hippocampal), " genes")
+
+```
+
+```{r}
+# Calculate common and unique genes
+common_genes <- intersect(tdep_Amygdala, tdep_Hippocampal)
+unique_Amygdala <- setdiff(tdep_Amygdala, tdep_Hippocampal)
+unique_Hippocampal <- setdiff(tdep_Hippocampal, tdep_Amygdala)
+
+message("\nGene set overlaps:")
+message("- Common genes: ", length(common_genes))
+message("- Unique to ", cluster1, ": ", length(unique_Amygdala))
+message("- Unique to ", cluster2, ": ", length(unique_Hippocampal))
+
+```
+
+```{r}
+# Create Venn diagram if we have genes in both sets
+if (length(tdep_Amygdala) > 0 && length(tdep_Hippocampal) > 0) {
+  venn_filename <- paste0("figures/Venn_diagram_", cluster1, "_vs_", cluster2, ".png")
+  
+  png(venn_filename, width = 800, height = 600)
+  venn.plot <- draw.pairwise.venn(
+    area1 = length(tdep_Amygdala),
+    area2 = length(tdep_Hippocampal),
+    cross.area = length(common_genes),
+    category = c("Amygdala excitatory", "Hippocampal CA1-3"),
+    fill = c("skyblue", "lightgreen"),
+    alpha = rep(0.5, 2),
+    cat.pos = c(-20, 20),
+    cat.dist = rep(0.05, 2),
+    scaled = TRUE,
+    ext.text = FALSE,
+    ext.line.lwd = 2,
+    ext.dist = -0.15,
+    ext.length = 0.9,
+    ext.pos = -4,
+    inverted = FALSE,
+    cex = 1.5,
+    cat.cex = 1.4,
+    margin = 0.1
+  )
+  grid.draw(venn.plot)
+  dev.off()
+  
+  message("\nSaved Venn diagram as: ", venn_filename)
+} else {
+  message("\nVenn diagram not created: missing genes in one or both sets")
+}
+
+```
+
+```{r}
+# Save gene lists for downstream analysis
+write_lines(unique_Amygdala, "data/unique_Amygdala_genes.txt")
+write_lines(unique_Hippocampal, "data/unique_Hippocampal_genes.txt")
+write_lines(common_genes, "data/common_genes.txt")
+
+message("\nSaved gene lists to text files for downstream analysis")
+```
+

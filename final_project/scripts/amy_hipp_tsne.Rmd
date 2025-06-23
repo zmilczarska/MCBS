@@ -1,0 +1,83 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-06-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+T-sne plot for amygdala excitatory
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(ggplot2)
+
+# Read first 5 rows
+sample_data <- fread("../data/amygdala_tsne.csv.gz", nrows = 10)
+print("Sample data:")
+print(sample_data)
+
+amy_data <- fread("../data/amygdala_tsne.csv.gz") 
+
+# Basic t-SNE plot
+plot_amy <- ggplot(amy_data, aes(x = TSNE1, y = TSNE2)) +
+  geom_point(alpha = 0.5, size = 1) +
+  labs(title = "AMygdala Excitatory t-SNE Projection") +
+  theme_minimal()
+
+if ("Cluster" %in% colnames(hipp_data)) {plot_amy <-
+  ggplot(amy_data, aes(x = TSNE1, y = TSNE2, color = as.factor(Cluster))) +
+    geom_point(alpha = 0.7) +
+    scale_color_viridis_d() +
+    labs(title = "AMygdala Excitatory t-SNE by Cluster",
+         color = "Cluster") +  
+    theme_minimal()
+}
+output_path <- file.path(getwd(), "..", "figures", "tSNE_amygdala_excitatory.pdf")
+ggsave(
+  plot = plot_amy,
+  filename = output_path,
+  width = 14,
+  height = 10
+)
+
+```
+T-sne plot for Hippocampal CA1-3
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+# Read first 5 rows
+sample_data <- fread("../data/hipp_tsne.csv.gz", nrows = 10)
+print("Sample data:")
+print(sample_data)
+
+hipp_data <- fread("../data/hipp_tsne.csv.gz") 
+
+# Basic t-SNE plot
+plot_hip <- ggplot(hipp_data, aes(x = TSNE1, y = TSNE2)) +
+  geom_point(alpha = 0.5, size = 1) +
+  labs(title = "Hippocampal CA1-3 t-SNE Projection") +
+  theme_minimal()
+
+if ("Cluster" %in% colnames(hipp_data)) {plot_hip <-
+  ggplot(hipp_data, aes(x = TSNE1, y = TSNE2, color = as.factor(Cluster))) +
+    geom_point(alpha = 0.7) +
+    scale_color_viridis_d() +
+    labs(title = "Hippocampal CA1-3 t-SNE by Cluster",
+         color = "Cluster") +  
+    theme_minimal()
+}
+output_path <- file.path(getwd(), "..", "figures", "tSNE_hippocampalca13.pdf")
+ggsave(
+  plot = plot_hip,
+  filename = output_path,
+  width = 14,
+  height = 10)
+```
+
+
