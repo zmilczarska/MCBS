@@ -1,0 +1,451 @@
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Analysis for amygdala exc. an hipp. ca1-3
+#TSNE amygdala exc. scz2022
+```{r}
+library(data.table)
+library(tidyverse)
+library(ggplot2)
+
+
+# 1. tsne data
+dat.tsne <- fread("../data/amygdala_tsne.csv.gz")
+cat("tsne amy")
+names(dat.tsne)
+# 2. sldsc data
+dat.cluster.res.amy <- read_xlsx("../data/Supplementary_Datasets.xlsx", 
+                           sheet = "Supplementary_Data_8") %>%
+  filter(Phenotype == "scz2022") %>%
+  filter(str_detect(Cluster, "Amygdala excitatory")) %>%
+  mutate(
+    Cluster_num = as.numeric(str_extract(Cluster, "(?<=\\()\\d+(?=\\))")),
+    minuslog10P = -log10(P),
+    is_significant = if.sig.fdr == "yes",
+    Cluster_num = factor(Cluster_num) 
+  ) %>%
+  arrange(desc(minuslog10P)) %>% 
+  mutate(Cluster_num = fct_inorder(Cluster_num)) 
+
+# 3. merge data
+dat <- dat.tsne %>%
+  mutate(Cluster_num = as.character(Cluster)) %>%  
+  left_join(dat.cluster.res.amy, by = "Cluster_num")  
+# 4. labels
+mylab <- dat %>%
+  group_by(Cluster_num) %>%
+  summarise(
+    TSNE1 = mean(TSNE1),
+    TSNE2 = mean(TSNE2)
+  ) %>%
+  ungroup()
+
+# 5. tsne plot
+p1 <- ggplot(dat %>% mutate(tmp = "not sig. (FDR)"),
+             aes(x = TSNE1, y = TSNE2, color = minuslog10P, fill = tmp)) +
+  geom_point(alpha = 0.5, size = 1) + 
+  theme_classic() +
+  scico::scale_color_scico(palette = "lajolla", 
+                           direction = -1,
+                           na.value = "#E5E5E5", midpoint = 0.75,
+                           name = "scz2022\n-log10(P)") +
+  xlab("tSNE1") + ylab("tSNE2") + 
+  scale_fill_manual(values = NA, name = "") +
+  guides(fill = guide_legend(override.aes = list(fill = "#E5E5E5",
+                                               size = 2))) +
+  theme(legend.position = "bottom", legend.box = "horizontal")
+
+# adding labels
+if(nrow(mylab) > 0) {
+  p1 <- p1 + 
+    annotate(geom = "text", x = mylab$TSNE1, y = mylab$TSNE2, 
+             label = mylab$Cluster_num, color = "black")
+}
+
+
+output_path <- file.path(getwd(), "..", "figures", "tSNE_amygdala_excitatory_scz2022.pdf")
+
+ggsave(
+  plot = p1,
+  filename = output_path,
+  width = 10,
+  height = 10.5
+)
+```
+#SNP-heritability enrichment by cluster- AMygdala exc- data from paper
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(stringr)
+library(scico) 
+
+# 1. data load and prep
+
+dat.cluster.res.amy <- read_xlsx("../data/Supplementary_Datasets.xlsx", 
+                           sheet = "Supplementary_Data_8") %>%
+  filter(Phenotype == "scz2022") %>%
+  filter(str_detect(Cluster, "Amygdala excitatory")) %>%
+  mutate(
+    Cluster_num = as.numeric(str_extract(Cluster, "(?<=\\()\\d+(?=\\))")),
+    minuslog10P = -log10(P),
+    is_significant = if.sig.fdr == "yes",
+    Cluster_num = factor(Cluster_num) 
+  ) %>%
+  arrange(desc(minuslog10P)) %>% 
+  mutate(Cluster_num = fct_inorder(Cluster_num)) 
+
+# 2. plot
+p <- ggplot(dat.cluster.res.amy, 
+           aes(x = Cluster_num, 
+               y = minuslog10P,
+               fill = minuslog10P)) +
+  geom_col(alpha = 0.8, width = 0.7) +
+  geom_hline(yintercept = -log10(0.05), 
+             linetype = "dashed", 
+             color = "red",
+             linewidth = 0.8) +
+  scico::scale_fill_scico(palette = "lajolla", 
+                         direction = -1,
+                         name = "-log10(p-value)") +
+  labs(
+    title = "Schizophrenia (scz2022) - Amygdala Excitatory",
+    subtitle = "SNP-heritability enrichment by cluster (sorted by significance)",
+    x = "Cluster number",
+    y = "-log10(p-value)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10, face = "bold"),
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 11),
+    panel.grid.major.x = element_blank()
+  )
+
+# 3. save
+print(p)
+ggsave("../figures/scz2022_amygdala_excitatory_enrichment_sorted.pdf",
+       plot = p,
+       width = 10, 
+       height = 6)
+
+```
+#SNP-heritability enrichment by cluster- AMygdala exc- my sldsc data
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(stringr)
+library(scico) 
+
+# 1. data load and prep
+dat.cluster.res.my <- fread("../data/amygdala_tsne.csv.gz")
+cat("tsne amy\n")
+names(dat.tsne)
+df <- fread("../data/amygdala_sldsc.csv")
+
+# 3. Function Fisher 
+combine_pvalues_fisher <- function(p) {
+  chisq_stat <- -2 * sum(log(p), na.rm = TRUE)
+  df <- 2 * sum(!is.na(p))
+  p_combined <- pchisq(chisq_stat, df = df, lower.tail = FALSE)
+  return(p_combined)
+}
+
+# 4. Agregation p-value (Fisher)
+dat.cluster.res.my <- df %>%
+  group_by(Cluster_num) %>%
+  summarise(
+    combined_pvalue = combine_pvalues_fisher(Enrichment_p),
+    minuslog10P = -log10(combined_pvalue),
+    if.sig.fdr = ifelse(combined_pvalue < 0.05, "yes", "no")
+  ) %>%
+  # Sort by minuslog10P in descending order and convert to factor
+  arrange(desc(minuslog10P)) %>%
+  mutate(Cluster_num = factor(Cluster_num, levels = Cluster_num))
+
+# 2. plot
+p <- ggplot(dat.cluster.res.my, 
+           aes(x = Cluster_num, 
+               y = minuslog10P,
+               fill = minuslog10P)) +
+  geom_col(alpha = 0.8, width = 0.7) +
+  geom_hline(yintercept = -log10(0.05), 
+             linetype = "dashed", 
+             color = "red",
+             linewidth = 0.8) +
+  scico::scale_fill_scico(palette = "lajolla", 
+                         direction = -1,
+                         midpoint = 0.4,
+                         name = "-log10(p-value)") +
+  labs(
+    title = "Schizophrenia (scz2022) - Amygdala Excitatory",
+    subtitle = "SNP-heritability enrichment by cluster (sorted by significance)",
+    x = "Cluster number",
+    y = "-log10(p-value)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10, face = "bold"),
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 11),
+    panel.grid.major.x = element_blank()
+  )
+
+# 3. save
+print(p)
+ggsave("../figures/scz2022_amygdala_excitatory_enrichment_sorted_my.pdf",
+       plot = p,
+       width = 10, 
+       height = 6)
+
+```
+tsne plot scz2022- AMygdala exc- data from paper
+```{r}
+# 3. merge data
+dat <- dat.tsne %>%
+  mutate(Cluster_num = as.character(Cluster)) %>%  
+  left_join(dat.cluster.res.amy, by = "Cluster_num")  
+# 4. labels
+mylab <- dat %>%
+  group_by(Cluster_num) %>%
+  summarise(
+    TSNE1 = mean(TSNE1),
+    TSNE2 = mean(TSNE2)
+  ) %>%
+  ungroup()
+
+# 5. tsne plot
+p1 <- ggplot(dat %>% mutate(tmp = "not sig. (FDR)"),
+             aes(x = TSNE1, y = TSNE2, color = minuslog10P, fill = tmp)) +
+  geom_point(alpha = 0.5, size = 1) + 
+  theme_classic() +
+  scico::scale_color_scico(palette = "lajolla", 
+                           direction = -1,
+                           na.value = "#E5E5E5", midpoint = 5,
+                           name = "scz2022\n-log10(P)") +
+  xlab("tSNE1") + ylab("tSNE2") + 
+  scale_fill_manual(values = NA, name = "") +
+  guides(fill = guide_legend(override.aes = list(fill = "#E5E5E5",
+                                               size = 2))) +
+  theme(legend.position = "bottom", legend.box = "horizontal")
+
+# adding labels
+if(nrow(mylab) > 0) {
+  p1 <- p1 + 
+    annotate(geom = "text", x = mylab$TSNE1, y = mylab$TSNE2, 
+             label = mylab$Cluster_num, color = "black")
+}
+output_path <- file.path(getwd(), "..", "figures", "tSNE_amygdala_excitatory_scz2022_sup.pdf")
+
+ggsave(
+  plot = p1,
+  filename = output_path,
+  width = 10,
+  height = 10.5
+)
+```
+TSNE plot  Fisher combined p-values for AMygdala - my sldsc data
+```{r}
+library(data.table)
+library(tidyverse)
+library(ggplot2)
+library(scico)
+
+# 1. load data
+dat.tsne <- fread("../data/amygdala_tsne.csv.gz")
+cat("tsne amy\n")
+names(dat.tsne)
+df <- fread("../data/amygdala_sldsc.csv")
+
+# 3. Function Fisher 
+combine_pvalues_fisher <- function(p) {
+  chisq_stat <- -2 * sum(log(p), na.rm = TRUE)
+  df <- 2 * sum(!is.na(p))
+  p_combined <- pchisq(chisq_stat, df = df, lower.tail = FALSE)
+  return(p_combined)
+}
+
+# 4. Agregation p-value (Fisher)
+dat.cluster.res <- df %>%
+  group_by(Cluster_num) %>%
+  summarise(
+    combined_pvalue = combine_pvalues_fisher(Enrichment_p),
+    minuslog10P = -log10(combined_pvalue),
+    if.sig.fdr = ifelse(combined_pvalue < 0.05, "yes", "no")
+  ) %>%
+  mutate(Cluster_num = as.character(Cluster_num))
+
+cat("sldsc data\n")
+print(dat.cluster.res)
+
+# 5. Merge  tsne
+dat <- dat.tsne %>%
+  mutate(Cluster_num = as.character(Cluster)) %>%
+  left_join(dat.cluster.res, by = "Cluster_num")  
+
+# 6. Labels 
+mylab <- dat %>%
+  group_by(Cluster_num) %>%
+  summarise(
+    TSNE1 = mean(TSNE1),
+    TSNE2 = mean(TSNE2)
+  ) %>%
+  ungroup()
+
+# 7. Plot TSNE
+p1 <- ggplot(dat %>% mutate(tmp = "not sig. (FDR)"),
+             aes(x = TSNE1, y = TSNE2, color = minuslog10P, fill = tmp)) +
+  geom_point(alpha = 0.5, size = 1) + 
+  theme_classic() +
+  scico::scale_color_scico(palette = "lajolla", 
+                           direction = -1,
+                           na.value = "#E5E5E5", midpoint = 5,
+                           name = "-log10(P) (Fisher combined)") +
+  xlab("tSNE1") + ylab("tSNE2") + 
+  scale_fill_manual(values = NA, name = "") +
+  guides(fill = guide_legend(override.aes = list(fill = "#E5E5E5", size = 2))) +
+  theme(legend.position = "bottom", legend.box = "horizontal")
+
+# 8. adding labels
+if(nrow(mylab) > 0) {
+  p1 <- p1 + 
+    annotate(geom = "text", x = mylab$TSNE1, y = mylab$TSNE2, 
+             label = mylab$Cluster_num, color = "black")
+}
+
+# 9. file save
+output_path <- file.path(getwd(), "..", "figures", "tsne_amygdala_sldsc_fisher.pdf")
+
+ggsave(
+  plot = p1,
+  filename = output_path,
+  width = 10,
+  height = 10.5
+)
+
+
+```
+tsne plot for hippocampal ca1-3- data from paper
+```{r}
+# 1. tsne data
+dat.tsne <- fread("../data/hipp_tsne.csv.gz")
+
+dat.cluster.res <- read_xlsx("../data/Supplementary_Datasets.xlsx", 
+                           sheet = "Supplementary_Data_8") %>%
+  filter(Phenotype == "scz2022") %>%
+  filter(str_detect(Cluster, "Hippocampal CA1-3")) %>%
+  mutate(
+    Cluster_num = as.numeric(str_extract(Cluster, "(?<=\\()\\d+(?=\\))")),
+    minuslog10P = -log10(P),
+    is_significant = if.sig.fdr == "yes",
+    Cluster_num = factor(Cluster_num) 
+  ) %>%
+  arrange(desc(minuslog10P)) %>% 
+  mutate(Cluster_num = fct_inorder(Cluster_num)) 
+# 3. merge data
+dat <- dat.tsne %>%
+  mutate(Cluster_num = as.character(Cluster)) %>%  
+  left_join(dat.cluster.res, by = "Cluster_num")  
+# 4. labels
+mylab <- dat %>%
+  group_by(Cluster_num) %>%
+  summarise(
+    TSNE1 = mean(TSNE1),
+    TSNE2 = mean(TSNE2)
+  ) %>%
+  ungroup()
+
+# 5. tsne plot
+p1 <- ggplot(dat %>% mutate(tmp = "not sig. (FDR)"),
+             aes(x = TSNE1, y = TSNE2, color = minuslog10P, fill = tmp)) +
+  geom_point(alpha = 0.5, size = 1) + 
+  theme_classic() +
+  scico::scale_color_scico(palette = "lajolla", 
+                           direction = -1,
+                           na.value = "#E5E5E5", midpoint = 5,
+                           name = "scz2022\n-log10(P)") +
+  xlab("tSNE1") + ylab("tSNE2") + 
+  scale_fill_manual(values = NA, name = "") +
+  guides(fill = guide_legend(override.aes = list(fill = "#E5E5E5",
+                                               size = 2))) +
+  theme(legend.position = "bottom", legend.box = "horizontal")
+
+# adding labels
+if(nrow(mylab) > 0) {
+  p1 <- p1 + 
+    annotate(geom = "text", x = mylab$TSNE1, y = mylab$TSNE2, 
+             label = mylab$Cluster_num, color = "black")
+}
+output_path <- file.path(getwd(), "..", "figures", "tSNE_hippocampal_ca1-3_scz2022.pdf")
+
+ggsave(
+  plot = p1,
+  filename = output_path,
+  width = 10,
+  height = 10.5
+)
+```
+#SNP-heritability enrichment by cluster- hippocampal ca1-3 - data from paper
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(stringr)
+library(scico) 
+
+# 1. data load and prep
+dat.cluster.res.sup <- read_xlsx("../data/Supplementary_Datasets.xlsx", 
+                           sheet = "Supplementary_Data_8") %>%
+  filter(Phenotype == "scz2022") %>%
+  filter(str_detect(Cluster, "Hippocampal CA1-3")) %>%
+  mutate(
+    Cluster_num = as.numeric(str_extract(Cluster, "(?<=\\()\\d+(?=\\))")),
+    minuslog10P = -log10(P),
+    is_significant = if.sig.fdr == "yes",
+    Cluster_num = factor(Cluster_num) 
+  ) %>%
+  arrange(desc(minuslog10P)) %>% 
+  mutate(Cluster_num = fct_inorder(Cluster_num)) 
+
+# 2. plot
+p <- ggplot(dat.cluster.res.sup, 
+           aes(x = Cluster_num, 
+               y = minuslog10P,
+               fill = minuslog10P)) +
+  geom_col(alpha = 0.8, width = 0.7) +
+  geom_hline(yintercept = -log10(0.05), 
+             linetype = "dashed", 
+             color = "red",
+             linewidth = 0.8) +
+  scico::scale_fill_scico(palette = "lajolla", 
+                         direction = -1,
+                         name = "-log10(p-value)") +
+  labs(
+    title = "Schizophrenia (scz2022) - Hippocampal CA1-3",
+    subtitle = "SNP-heritability enrichment by cluster (sorted by significance)",
+    x = "Cluster number",
+    y = "-log10(p-value)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10, face = "bold"),
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 11),
+    panel.grid.major.x = element_blank()
+  )
+
+# 3. save
+print(p)
+ggsave("../figures/scz2022_hippocampal_enrichment_sorted.pdf",
+       plot = p,
+       width = 10, 
+       height = 6)
+
+```

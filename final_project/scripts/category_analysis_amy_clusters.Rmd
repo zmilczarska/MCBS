@@ -1,0 +1,65 @@
+---
+title: "category analysis in clusters"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(pheatmap)
+
+```
+
+```{r}
+df <- read.csv("../data/amygdala_sldsc.csv")
+glimpse(df)
+
+```
+
+```{r}
+p1 <- ggplot(df, aes(x = factor(Cluster_num), y = Enrichment)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(title = "Enrichment in clusters", x = "Clusters", y = "Enrichment") +
+  theme_minimal()
+
+p2 <- ggplot(df, aes(x = factor(Cluster_num), y = Prop._h2)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(title = "Prop._h2 in clusters", x = "Clusters", y = "Prop._h2") +
+  theme_minimal()
+
+ggarrange(p1, p2, ncol = 2, nrow = 2)
+
+```
+
+
+
+```{r}
+# data prepare _ top 30 enrichment
+top_categories <- df %>%
+  group_by(Category) %>%
+  summarise(var_enrichment = var(Enrichment, na.rm = TRUE)) %>%
+  arrange(desc(var_enrichment)) %>%
+  slice_head(n = 30) %>%
+  pull(Category)
+
+heat_data <- df %>%
+  filter(Category %in% top_categories) %>%
+  group_by(Category, Cluster_num) %>%
+  summarise(mean_enrichment = mean(Enrichment, na.rm = TRUE)) %>%
+  pivot_wider(names_from = Cluster_num, values_from = mean_enrichment) %>%
+  column_to_rownames("Category")
+
+# Heatmap
+pheatmap(
+  as.matrix(heat_data),
+  scale = "row",
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  fontsize_row = 8,     
+  fontsize_col = 10,    
+  main = "Heatmap average Enrichment (Top 30 categories)"
+)
+
+```
+

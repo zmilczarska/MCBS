@@ -1,0 +1,174 @@
+---
+title: "amy_tsne"
+output: html_document
+date: "2025-06-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+
+# 1. Wczytaj dane t-SNE
+amyg_tsne <- read_csv("../data/amygdala_tsne.csv.gz")
+```
+
+```{r}
+# 2. Wczytaj mapowanie Cluster → Supercluster
+cluster_map <- read_excel("../data/siletti_table_s2.xlsx") %>%
+  select(Cluster = 1, Supercluster = 2) %>%
+  mutate(Supercluster = gsub("-| ", "_", Supercluster)) %>%
+  filter(Supercluster == "Amygdala_excitatory") %>%
+  mutate(Cluster = as.character(Cluster))
+
+```
+
+```{r}
+colnames(amyg_tsne)  # Wyświetla nazwy kolumn
+head(amyg_tsne)       # Pokazuje pierwsze wiersze
+glimpse(amyg_tsne)    # Bardziej szczegółowy podgląd struktury danych
+```
+
+```{r}
+amyg_tsne <- amyg_tsne %>%  
+  mutate(Cluster = str_extract(CellID, "(?<=_)\\d+(?=:)")) %>%  # Wyciąga numer przed ":" i po "_"
+  mutate(Cluster = paste0("V", Cluster))  # Dopasowuje do formatu "V1", "V2" itd.
+```
+
+```{r}
+# 3. Wczytaj wyniki S-LDSC z Supplementary_Data_8
+scz <- read_xlsx("../data/Supplementary_Datasets.xlsx", sheet = "Supplementary_Data_8") %>%
+  filter(Phenotype == "scz2022") %>%
+  mutate(
+    Cluster0 = str_extract(Cluster, "\\((\\d+)\\)"),
+    Cluster0 = gsub("[()]", "", Cluster0),
+    Cluster = paste0("V", Cluster0),
+    log10p = -log10(P),
+    sig_fdr = ifelse(P.fdr < 0.05, "yes", "no")
+  ) %>%
+  dplyr::select(Cluster, log10p, sig_fdr)
+
+# 4. Połącz dane t-SNE z wynikami S-LDSC
+df_plot <- amyg_tsne %>%
+  left_join(scz, by = "Cluster")
+
+```
+
+```{r}
+
+# 5. Wykres tSNE
+ggplot(df_plot, aes(x = TSNE1, y = TSNE2)) +
+  geom_point(aes(color = ifelse(sig_fdr == "yes", log10p, NA)),
+             size = 0.7, alpha = 0.9) +
+  scale_color_viridis_c(option = "plasma", na.value = "grey80", name = "-log10(p)") +
+  theme_classic() +
+  labs(title = "Amygdala excitatory: SCZ S-LDSC enrichment by cluster")
+```
+```{r}
+library(tidyverse)
+library(here)
+library(data.table)
+library(readxl)
+library(ggrepel)
+```
+
+
+
+```{r}
+library(tidyverse)
+
+# 1. Wczytaj dane
+amygdala_tsne <- read_csv("../data/amy_tsne.csv.gz")
+sldsc_results <- read_csv("../data/amygdala_sldsc_results_mapped.csv")
+
+# 2. Sprawdź unikalne wartości klastrów
+cat("Unikalne klastry w t-SNE:", unique(amygdala_tsne$Cluster), "\n")
+cat("Unikalne klastry w S-LDSC:", unique(sldsc_results$Cluster_num), "\n")
+
+# 3. Upewnij się, że typy danych są zgodne
+sldsc_results <- sldsc_results %>%
+  mutate(Cluster_num = as.integer(Cluster_num))  # Konwertuj na integer
+
+# 4. Połącz dane przez Cluster_num
+merged_data <- amygdala_tsne %>%
+  left_join(sldsc_results, by = c("Cluster" = "Cluster_num"))
+
+```
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+
+# 2. Podstawowy wykres t-SNE (kolorowanie przez Enrichment)
+tsne_plot <- ggplot(merged_data, aes(x = TSNE1, y = TSNE2)) +
+  geom_point(aes(color = Enrichment), 
+             size = 0.8, 
+             alpha = 0.7) +
+  scale_color_viridis_c(
+    option = "plasma",
+    name = "SCZ Enrichment",
+    na.value = "grey90",
+    limits = c(0, max(merged_data$Enrichment, na.rm = TRUE))
+  ) +
+  labs(title = "Amygdala t-SNE: SCZ S-LDSC Enrichment",
+       subtitle = paste("Liczba komórek:", nrow(merged_data))) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# 3. Wersja z logarytmiczną skalą kolorów (dla lepszej wizualizacji dużych wartości)
+tsne_plot_log <- tsne_plot +
+  scale_color_viridis_c(
+    trans = "log10",
+    name = "log10(Enrichment)",
+    breaks = scales::trans_breaks("log10", function(x) 10^x),
+    labels = scales::trans_format("log10", scales::math_format(10^.x))
+  )
+
+# 4. Wersja z podziałem na kategorie (jeśli Enrichment jest dyskretny)
+if ("Enrichment_group" %in% colnames(merged_data)) {
+  tsne_plot_discrete <- ggplot(merged_data, aes(x = TSNE1, y = TSNE2)) +
+    geom_point(aes(color = Enrichment_group), 
+               size = 0.8, 
+               alpha = 0.7) +
+    scale_color_viridis_d(
+      option = "plasma",
+      name = "SCZ Enrichment"
+    ) +
+    labs(title = "Amygdala t-SNE: SCZ Enrichment (kategorie)") +
+    theme_minimal()
+}
+
+# 5. Zapisz wykresy
+ggsave("tsne_enrichment.png", tsne_plot, width = 10, height = 8)
+ggsave("tsne_enrichment_log.png", tsne_plot_log, width = 10, height = 8)
+
+# 6. Wyświetl podsumowanie
+print(tsne_plot)
+summary(merged_data$Enrichment)
+```
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+# Read full data (if file isn't too large)
+tsne_data2 <- fread("../data/amy_tsne.csv.gz") 
+
+# Basic t-SNE plot
+ggplot(tsne_data2, aes(x = TSNE1, y = TSNE2)) +
+  geom_point(alpha = 0.5, size = 1) +
+  labs(title = "Amygdala t-SNE Projection") +
+  theme_minimal()
+
+# If you have cluster annotations (replace 'Cluster' with your actual column name)
+if ("Cluster" %in% colnames(tsne_data2)) {
+  ggplot(tsne_data2, aes(x = TSNE1, y = TSNE2, color = Cluster)) +
+    geom_point(alpha = 0.7) +
+    scale_color_viridis_d() +
+    labs(title = "Anygdala t-SNE by Cluster") +
+    theme_minimal()
+}
+```
+
